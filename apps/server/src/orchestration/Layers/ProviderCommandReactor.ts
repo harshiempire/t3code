@@ -472,6 +472,7 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly externalResumeSessionId?: string;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -716,7 +717,25 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
-    const startedSession = yield* startProviderSession(undefined);
+    const externalResumeSessionId = options?.externalResumeSessionId;
+    if (externalResumeSessionId !== undefined && desiredDriverKind !== "claudeAgent") {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabel(preferredProvider),
+        method: "thread.turn.start",
+        detail: `Thread '${threadId}' requested to resume external session '${externalResumeSessionId}', which is only supported for Claude Code.`,
+      });
+    }
+    if (externalResumeSessionId !== undefined) {
+      yield* Effect.logInfo("provider command reactor resuming external provider session", {
+        threadId,
+        externalResumeSessionId,
+      });
+    }
+    const startedSession = yield* startProviderSession(
+      externalResumeSessionId !== undefined
+        ? { resumeCursor: { resume: externalResumeSessionId } }
+        : undefined,
+    );
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
   });
@@ -727,6 +746,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
+    readonly externalResumeSessionId?: string;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -737,6 +757,9 @@ const make = Effect.gen(function* () {
     }
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      ...(input.externalResumeSessionId !== undefined
+        ? { externalResumeSessionId: input.externalResumeSessionId }
+        : {}),
       pendingTurnStart: true,
     });
     if (input.modelSelection !== undefined) {
@@ -1156,6 +1179,9 @@ const make = Effect.gen(function* () {
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
+        : {}),
+      ...(event.payload.externalResumeSessionId !== undefined
+        ? { externalResumeSessionId: event.payload.externalResumeSessionId }
         : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,

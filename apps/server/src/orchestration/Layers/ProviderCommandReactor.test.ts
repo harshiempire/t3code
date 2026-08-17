@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import {
+  ExternalResumeSessionId,
   ModelSelection,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -1862,6 +1863,105 @@ describe("ProviderCommandReactor", () => {
       thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
     ).toBeUndefined();
   });
+
+  effectIt.effect("seeds the first provider session from an external Claude session id", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          threadModelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-6",
+          },
+        }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-external-resume"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-external-resume"),
+          role: "user",
+          text: "continue the terminal conversation",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        externalResumeSessionId: ExternalResumeSessionId.make(
+          "f66f4325-82ae-4e1c-999a-9c0f4efe4320",
+        ),
+        createdAt: now,
+      });
+
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        resumeCursor: { resume: "f66f4325-82ae-4e1c-999a-9c0f4efe4320" },
+      });
+    }),
+  );
+
+  effectIt.effect(
+    "fails the first turn when an external session resume targets a non-Claude provider",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            threadModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+          }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-external-resume-codex"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-external-resume-codex"),
+            role: "user",
+            text: "continue the terminal conversation",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          externalResumeSessionId: ExternalResumeSessionId.make(
+            "f66f4325-82ae-4e1c-999a-9c0f4efe4320",
+          ),
+          createdAt: now,
+        });
+
+        yield* Effect.promise(() =>
+          waitFor(async () => {
+            const readModel = await harness.readModel();
+            const thread = readModel.threads.find(
+              (entry) => entry.id === ThreadId.make("thread-1"),
+            );
+            return (
+              thread?.activities.some(
+                (activity) => activity.kind === "provider.turn.start.failed",
+              ) ?? false
+            );
+          }),
+        );
+
+        expect(harness.startSession).not.toHaveBeenCalled();
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        const readModel = yield* Effect.promise(() => harness.readModel());
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+        expect(
+          thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
+        ).toMatchObject({
+          payload: {
+            detail: expect.stringContaining("only supported for Claude Code"),
+          },
+        });
+      }),
+  );
 
   it("reuses the same provider session when runtime mode is unchanged", async () => {
     const harness = await createHarness();

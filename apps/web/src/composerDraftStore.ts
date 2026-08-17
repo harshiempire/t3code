@@ -217,6 +217,7 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  externalResumeSessionId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -321,6 +322,12 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  /**
+   * External provider CLI session (e.g. a Claude Code terminal chat) the
+   * thread's first turn should resume. Machine-specific like branch and
+   * worktree path, so a project/environment change drops it.
+   */
+  externalResumeSessionId: string | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -414,6 +421,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      externalResumeSessionId?: string | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -1413,6 +1421,9 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    externalResumeSessionId: projectChanged
+      ? null
+      : (existingThread?.externalResumeSessionId ?? null),
     promotedTo: null,
   };
 }
@@ -1445,6 +1456,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    left.externalResumeSessionId === right.externalResumeSessionId &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1588,6 +1600,10 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        externalResumeSessionId:
+          typeof candidateDraftThread.externalResumeSessionId === "string"
+            ? candidateDraftThread.externalResumeSessionId
+            : null,
         promotedTo,
       };
     }
@@ -1634,6 +1650,7 @@ function normalizePersistedDraftThreads(
           worktreePath: null,
           envMode: "local",
           startFromOrigin: false,
+          externalResumeSessionId: null,
           promotedTo: null,
         };
       } else if (
@@ -2237,6 +2254,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    externalResumeSessionId: persistedDraftThread.externalResumeSessionId ?? null,
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2455,6 +2473,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               options.startFromOrigin === undefined
                 ? existing.startFromOrigin
                 : options.startFromOrigin;
+            const nextExternalResumeSessionId =
+              options.externalResumeSessionId === undefined
+                ? projectChanged
+                  ? null
+                  : existing.externalResumeSessionId
+                : options.externalResumeSessionId;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -2471,6 +2495,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              externalResumeSessionId: nextExternalResumeSessionId,
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2484,6 +2509,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              nextDraftThread.externalResumeSessionId === existing.externalResumeSessionId &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

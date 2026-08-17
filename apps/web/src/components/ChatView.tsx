@@ -249,6 +249,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { DraftExternalSessionControl } from "./chat/DraftExternalSessionControl";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -4969,6 +4970,25 @@ function ChatViewContent(props: ChatViewProps) {
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
+    // An attached external Claude Code session only means something on the
+    // thread's first turn with the Claude adapter; block the send instead of
+    // silently dropping the user's explicit resume intent.
+    if (isLocalDraftThread && draftThread?.externalResumeSessionId) {
+      const selectedDriver = providerStatuses.find(
+        (snapshot) => snapshot.instanceId === ctxSelectedModelSelection.instanceId,
+      )?.driver;
+      if (selectedDriver !== "claudeAgent") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Claude model required",
+            description:
+              "This draft resumes a Claude Code session. Pick a Claude model or remove the attached session.",
+          }),
+        );
+        return;
+      }
+    }
     const composerImages =
       directAnnotation?.image &&
       !sendContextImages.some((image) => image.id === directAnnotation.image?.id)
@@ -5293,6 +5313,9 @@ function ChatViewContent(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
+      const externalResumeSessionIdForSend = isLocalDraftThread
+        ? (draftThread?.externalResumeSessionId ?? null)
+        : null;
       beginLocalDispatch({ preparingWorktree: false });
       const startResult = await startThreadTurn({
         environmentId,
@@ -5309,6 +5332,9 @@ function ChatViewContent(props: ChatViewProps) {
           runtimeMode,
           interactionMode,
           ...(bootstrap ? { bootstrap } : {}),
+          ...(externalResumeSessionIdForSend
+            ? { externalResumeSessionId: externalResumeSessionIdForSend }
+            : {}),
           createdAt: messageCreatedAt,
         },
       });
@@ -6392,6 +6418,14 @@ function ChatViewContent(props: ChatViewProps) {
                           activeProjectTitle={activeProject?.title ?? null}
                         />
                       </div>
+                      {draftId && draftThread ? (
+                        <DraftExternalSessionControl
+                          externalResumeSessionId={draftThread.externalResumeSessionId}
+                          onChange={(externalResumeSessionId) =>
+                            setDraftThreadContext(draftId, { externalResumeSessionId })
+                          }
+                        />
+                      ) : null}
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                     </div>
                   ) : (

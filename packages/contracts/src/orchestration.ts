@@ -796,6 +796,17 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/**
+ * Session id of an external provider CLI conversation (e.g. a Claude Code
+ * terminal chat) that the thread's first turn should resume instead of
+ * starting fresh. Claude session ids are UUIDs; the adapter silently drops
+ * malformed ids, so reject them at the contract boundary instead.
+ */
+export const ExternalResumeSessionId = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+);
+export type ExternalResumeSessionId = typeof ExternalResumeSessionId.Type;
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -840,6 +851,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  externalResumeSessionId: Schema.optional(ExternalResumeSessionId),
   createdAt: IsoDateTime,
 });
 
@@ -859,6 +871,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  externalResumeSessionId: Schema.optional(ExternalResumeSessionId),
   createdAt: IsoDateTime,
 });
 
@@ -1254,6 +1267,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  externalResumeSessionId: Schema.optional(ExternalResumeSessionId),
   createdAt: IsoDateTime,
 });
 

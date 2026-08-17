@@ -102,6 +102,26 @@ This is different from the recommended Codex setup. Claude Code keeps account an
 multiple files under its config directory, so T3 Code keeps separate config directories isolated
 instead of trying to share part of the state.
 
+## Can I Continue A Claude Code Terminal Chat In T3 Code?
+
+Yes. A new thread can pick up a conversation you started with the Claude Code CLI in a terminal.
+
+1. Find the session id of the terminal conversation (run `/status` inside Claude Code, or check
+   `claude --resume` for the session list).
+2. In T3 Code, start a new thread in the project rooted at the same directory the terminal chat
+   ran in.
+3. Above the composer, choose **Resume a Claude Code session** and paste the session id.
+4. Pick a Claude model and send your first message.
+
+The agent continues with the full memory of the terminal conversation. The earlier terminal
+messages stay in the terminal — the T3 Code thread shows the conversation from the handoff
+onward.
+
+Two things must line up for the resume to find the session: the thread's project directory must
+match the directory the terminal chat ran in, and the Claude provider must use the same
+`CLAUDE_CONFIG_DIR path` (or default home) as the terminal. This only works on a thread's first
+message, and only with Claude models.
+
 ## I Want To Use OpenRouter
 
 Use this when you want Claude Code to talk to OpenRouter directly, without running a local router.
