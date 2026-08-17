@@ -18,6 +18,10 @@ import {
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
+  EXTERNAL_TRANSCRIPT_IMPORT_MAX_MESSAGES,
+  EXTERNAL_TRANSCRIPT_IMPORT_MESSAGE_ID_PREFIX,
+  type ExternalResumeSessionId,
+  MessageId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -84,6 +88,12 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import {
+  findClaudeSessionTranscriptPath,
+  readClaudeSessionTranscriptMessages,
+  resolveClaudeHomePathFromSetting,
+  resolveClaudeTranscriptDir,
+} from "./provider/claudeExternalTranscript.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -532,6 +542,92 @@ const makeWsRpcLayer = (
           ),
         );
 
+      // Longest text kept per imported transcript message; the reader appends
+      // a visible "[truncated]" marker when it cuts.
+      const EXTERNAL_TRANSCRIPT_IMPORT_MAX_TEXT_LENGTH = 50_000;
+
+      // Best-effort: imported history enhances an external session resume, so
+      // a missing or unreadable transcript logs a warning and the send
+      // proceeds without visible history instead of failing the bootstrap.
+      const importExternalTranscriptHistory = (input: {
+        readonly threadId: ThreadId;
+        readonly sessionId: ExternalResumeSessionId;
+      }) =>
+        Effect.gen(function* () {
+          const settings = yield* serverSettings.getSettings;
+          const homePath = resolveClaudeHomePathFromSetting(
+            settings.providers.claudeAgent.homePath,
+          );
+          const result = yield* Effect.promise(async () => {
+            const transcriptDir = await resolveClaudeTranscriptDir(homePath);
+            const transcriptPath = await findClaudeSessionTranscriptPath(
+              transcriptDir,
+              input.sessionId,
+            );
+            if (transcriptPath === null) {
+              return null;
+            }
+            return readClaudeSessionTranscriptMessages(transcriptPath, {
+              maxMessages: EXTERNAL_TRANSCRIPT_IMPORT_MAX_MESSAGES,
+              maxTextLength: EXTERNAL_TRANSCRIPT_IMPORT_MAX_TEXT_LENGTH,
+            });
+          });
+          if (result === null || result.messages.length === 0) {
+            yield* Effect.logWarning("external transcript import found no messages", {
+              threadId: input.threadId,
+              sessionId: input.sessionId,
+            });
+            return;
+          }
+          yield* orchestrationEngine.dispatch({
+            type: "thread.external-transcript.import",
+            commandId: yield* serverCommandId("external-transcript-import"),
+            threadId: input.threadId,
+            sessionId: input.sessionId,
+            messages: result.messages.map((message) => ({
+              messageId: MessageId.make(
+                `${EXTERNAL_TRANSCRIPT_IMPORT_MESSAGE_ID_PREFIX}${message.uuid}`,
+              ),
+              role: message.role,
+              text: message.text,
+              createdAt: message.createdAt,
+            })),
+            createdAt: yield* nowIso,
+          });
+          const summary =
+            result.totalMessageCount > result.messages.length
+              ? `Imported the last ${result.messages.length} of ${result.totalMessageCount} messages from a Claude Code session`
+              : `Imported ${result.messages.length} messages from a Claude Code session`;
+          const activityCreatedAt = yield* nowIso;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId: yield* serverCommandId("external-transcript-import-activity"),
+            threadId: input.threadId,
+            activity: {
+              id: yield* serverEventId,
+              tone: "info",
+              kind: "external-transcript.imported",
+              summary,
+              payload: {
+                sessionId: input.sessionId,
+                importedMessageCount: result.messages.length,
+                totalMessageCount: result.totalMessageCount,
+              },
+              turnId: null,
+              createdAt: activityCreatedAt,
+            },
+            createdAt: activityCreatedAt,
+          });
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("external transcript import failed; continuing without history", {
+              threadId: input.threadId,
+              sessionId: input.sessionId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+
       const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
         const error = Cause.squash(cause);
         return isOrchestrationDispatchCommandError(error)
@@ -910,6 +1006,12 @@ const makeWsRpcLayer = (
                 createdAt: bootstrap.createThread.createdAt,
               });
               createdThread = true;
+              if (command.externalResumeSessionId !== undefined) {
+                yield* importExternalTranscriptHistory({
+                  threadId: command.threadId,
+                  sessionId: command.externalResumeSessionId,
+                });
+              }
             }
 
             if (bootstrap?.prepareWorktree) {

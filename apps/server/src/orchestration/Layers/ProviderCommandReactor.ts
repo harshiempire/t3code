@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  EXTERNAL_TRANSCRIPT_IMPORT_MESSAGE_ID_PREFIX,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -1106,8 +1107,15 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // Imported transcript history is display-only and must not make a
+    // thread's first live turn look like a follow-up (which would skip
+    // first-turn title and branch generation).
     const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+      thread.messages.filter(
+        (entry) =>
+          entry.role === "user" &&
+          !entry.id.startsWith(EXTERNAL_TRANSCRIPT_IMPORT_MESSAGE_ID_PREFIX),
+      ).length === 1;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =

@@ -1357,6 +1357,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.external-transcript.import": {
+      const targetThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (targetThread.messages.length > 0 || targetThread.latestTurn !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already has conversation history; an external transcript can only be imported into an empty thread.`,
+        });
+      }
+      if (command.messages.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `External transcript import for thread '${command.threadId}' carried no messages.`,
+        });
+      }
+      // Each imported entry becomes a regular message-sent event stamped with
+      // its original transcript timestamp, so the read model orders it ahead
+      // of the first live turn without any projector or client changes.
+      const importedMessageEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      for (const message of command.messages) {
+        importedMessageEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: message.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: message.createdAt,
+            updatedAt: message.createdAt,
+          },
+        });
+      }
+      return importedMessageEvents;
+    }
+
     case "thread.activity.append": {
       const thread = yield* requireThread({
         readModel,

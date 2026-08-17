@@ -113,9 +113,13 @@ Yes. A new thread can pick up a conversation you started with the Claude Code CL
 3. Above the composer, choose **Resume a Claude Code session** and paste the session id.
 4. Pick a Claude model and send your first message.
 
-The agent continues with the full memory of the terminal conversation. The earlier terminal
-messages stay in the terminal — the T3 Code thread shows the conversation from the handoff
-onward.
+The agent continues with the full memory of the terminal conversation, and the terminal
+conversation itself is imported into the thread as visible history — you'll see the prior
+messages above your first one, along with an "Imported … from a Claude Code session" note.
+Long sessions import their most recent 200 messages, and the note says when older ones were
+left out. Imported messages are display history only: they carry no checkpoints or diffs, so
+per-turn actions apply from your first T3 Code message onward. If the transcript can't be
+read, the thread still resumes — it just starts without the visible history.
 
 Two things must line up for the resume to find the session: the thread's project directory must
 match the directory the terminal chat ran in, and the Claude provider must use the same

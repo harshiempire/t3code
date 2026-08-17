@@ -82,7 +82,7 @@ export const DraftExternalSessionControl = memo(function DraftExternalSessionCon
             <div className="text-muted-foreground text-xs">
               Paste the session id of a Claude Code CLI conversation started in this project's
               directory. The first message you send continues that conversation with its full
-              context. Earlier terminal messages stay in the terminal.
+              context, and the earlier terminal conversation is imported into this thread.
             </div>
             <Input
               autoFocus

@@ -1050,6 +1050,48 @@ const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
 });
 
+/** One transcript message imported from an external provider CLI session. */
+export const ThreadExternalTranscriptImportMessage = Schema.Struct({
+  messageId: MessageId,
+  role: OrchestrationMessageRole,
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type ThreadExternalTranscriptImportMessage =
+  typeof ThreadExternalTranscriptImportMessage.Type;
+
+/**
+ * Maximum messages a single external-transcript import may carry. The server
+ * keeps the newest messages when a transcript exceeds it and says so in the
+ * import activity, so truncation is visible rather than silent.
+ */
+export const EXTERNAL_TRANSCRIPT_IMPORT_MAX_MESSAGES = 200;
+
+/**
+ * Message-id prefix for transcript entries imported from an external session.
+ * Lets consumers (e.g. first-turn detection) tell imported display history
+ * apart from messages the user actually sent through T3 Code.
+ */
+export const EXTERNAL_TRANSCRIPT_IMPORT_MESSAGE_ID_PREFIX = "imported:";
+
+/**
+ * Server-only: seeds a brand-new thread with the prior conversation of an
+ * external provider CLI session (e.g. a Claude Code terminal chat) so the
+ * history renders in the thread. Dispatched during bootstrap between thread
+ * creation and the first turn; the decider re-emits each entry as a regular
+ * `thread.message-sent` event with its original timestamp.
+ */
+const ThreadExternalTranscriptImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.external-transcript.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  sessionId: ExternalResumeSessionId,
+  messages: Schema.Array(ThreadExternalTranscriptImportMessage).check(
+    Schema.isMaxLength(EXTERNAL_TRANSCRIPT_IMPORT_MAX_MESSAGES),
+  ),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1059,6 +1101,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadExternalTranscriptImportCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
